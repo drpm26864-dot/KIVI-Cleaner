@@ -1,4 +1,4 @@
-name: KIVI Cleaner 0.1.12 FULL
+name: KIVI Cleaner 0.1.13 FULL - ADB Root via native service
 on:
   workflow_dispatch:
 permissions:
@@ -144,7 +144,106 @@ jobs:
           patch --batch -p1 -d kivi-cleaner < patch-012.diff
           echo '259bf4fbee9d2964bfad33cadf6817a8a87029bb970e87e8868d5aa88232d12e  kivi-cleaner/app/src/main/java/ru/local/kivicleaner/MainActivity.java' | sha256sum -c -
           echo 'ba72925c2721b86ee69e06e11cd39cf4b37d61b4ca8aaad13830a5219aca1ec9  kivi-cleaner/app/src/main/java/ru/local/kivicleaner/AdbConsolePolicy.java' | sha256sum -c -
-      - name: Run full 0.1.12 tests
+      - name: Check console integration and fix incorrect version labels
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          root = Path('kivi-cleaner')
+          main = root / 'app/src/main/java/ru/local/kivicleaner/MainActivity.java'
+          vpn = root / 'app/src/main/java/ru/local/kivicleaner/VpnProbeDiagnostics.java'
+          text = main.read_text()
+          # The bundled TV helper remains 0.1.10; the earlier patch had a wrong UI label.
+          text = text.replace('Установите новую версию KIVI VPN Probe 0.1.11',
+                              'Установите KIVI VPN Probe 0.1.10')
+          main.write_text(text)
+          report = vpn.read_text().replace('KIVI Cleaner 0.1.11 — расширенная',
+                                           'KIVI Cleaner 0.1.12 — расширенная')
+          vpn.write_text(report)
+          # Fail early if an older source was accidentally restored.
+          assert 'ADB-КОНСОЛЬ' in text
+          assert 'runConsoleCommand()' in text
+          assert 'AdbConsolePolicy.classify(command)' in text
+          assert (root / 'app/src/main/java/ru/local/kivicleaner/AdbConsolePolicy.java').exists()
+          print('PASS: ADB console is present and TV Probe version label is consistent')
+          PYCODE
+      - name: Add native ADB root service, reconnect test and UI button
+        shell: bash
+        run: |
+          mkdir -p /tmp/kivi_root_overlay
+          base64 -d <<'KIVI_ROOT_OVERLAY' | xz -d | tar -xf - -C /tmp/kivi_root_overlay
+          /Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4E//E8pdADCcLNh8iZaKcKYYyGbPCxihetzIGf8R2rU6TzjehuT8tbXAwfaT4E6/Omg+dy/isH5ruU4I
+          E9Uqo/2KW+ijs2xhO74HTuIXc+FITJf5kSv9+HcxvSvOMbQWVTX2RZeQHGuR7SPc2wiiMOUvSLf7MCyVnZZ7suEyekmUTA1Qi3A+D2m5j093z4m4
+          a+Pb0IL04xLVaIwLmARTqpu01zME5V6KKxZuB5xGTBh/MBypp7Do7aKu5yfsXBfPBIyBa3AAZjZFm2crkBulx9vyocOWKAMxOd/sWWl/o/K098rg
+          Fu2UICgEJMIxKSfQEH0N7bOtKLs1cF3VtBR5oVF7DwKKO2X0Y6ltlWgtaTgT6OHmixpWJLX2zcFqz6SeavL335ANEFmNixtrXC9XD+kM0mKRf3e6
+          khtno8sXzJ4HUBmvX9LdW2le0mY3O3pTNyUi1k8M08Ihdq9KkHFT56iJTAVQZp/jaKUfkmM6+slBITYKqrAYIHwL8tu4HX+nhRSibUzLQ/oofRGV
+          lvNbW/dh66+gPGL4WeuwYVfPaZwx6FsN+j1Tk0RII0poktNG2nuZ9WJQBRdPPwF52e6l0kzvIpeCOZvVmWhV2zBv/2hIGSOrQ0l6LBgNTYFvAWD1
+          uymCeG9qqiCXU0dR50kOcKJ9OQLjhZbTHjghN/dD71jBNjqZBOYdTQgyC7FYvcXyl49iHZFCxc/FDgRcUvChaC6vZmVUq/eG0TARhVkSTfvctfwZ
+          GYwvCfHL+v0+Y8nPWx1Y//+iGdTRlKGuHOPvesutvQNaaTP+9y/IhGsv1hoB9aoYZQixlf+yBPI1nsARiFpbnqoowT1TUvMR0uht+wq5vtxJSNNk
+          3aBB6L4b5lFQZ14vi9Xg9vfIN1Yi8EIJbiGcYnN6p5yQtGtDKiwVTyKBdG3SGt+TDwyRtB/U7xqOQxsNh/GvE/0a8fI5ka9zoAUwtkZ1nTuYvf7S
+          6fngrt9jQ+JvBombEmYaJvwJq2eKU/T91j39phMBwwziEi68zZpDPy+oyKVoWCAX2Hoj/5ZQo2E/KcH8BCa9udDIn7eZM641Umt+ajivVBxEcj1Y
+          YJs5zZy+tNPmCOQ9rTIJ4TR0YlZUs9MXPdCxWXI9J6k+Nb2W7sReFRNUhMUOzYhbjBs+h7pgK2E0f4/604OnyoRoBbYKGfRfhvUe200DqEh0QF+h
+          xz8m6MXYMZc6ICWSjPIG0rv5DDfTQkseLgH/IzDiJsxyvgji8vJy2/WZ7lqRbG/2K3pL0LIfM+sCvTCK5gsdsiyW8D3U459k7veNxV/Bq8jqcOmr
+          OflTN1Kgio8X2LJcV/kNp5dRfVgG6Potc3OxQRpQLFzFjQaovkdGvJJggh2gZIi5c3mzCzSdcsW8McEdWuVimfsR6vqwAyL2C5DUy5RvKDZI2Yml
+          ibcEvsRWGEM22+dd/klFur6UzULzWuWeXo+SdKG32neAraJ75Iy+o1y7LTXS3aHuEBURAcqkY5h+eGYVqluBQ7O7V1K6o1Tpj+GIF7cVlZlIHTM1
+          WgditYPKHZNiSj9oCZwIbfkXW3aJFJwMAYl478Fa3siX+bU2eomHTgWhdAsbFIEgKl7JU1q6SsqcQqMUpSbq/zaKE3X5uA8zkOzYRmT/teF9toJ2
+          jy0PWPNQ/wZbtwbw0KcrZzhjGt9vDqoY2uCQ8EvDbj4Tv6XLD7drHCMiTmYSkP4fRk3123wQbpX0BoE+fHBKQNDbEdwFmFG/vSvXLZfAtdrnfDx+
+          5iJhvFlKX5pr2lFYq8Ot+y/DyUBQ6MydV9lOfMtUc4x3ht5ZZEUKFX9vBEy8ymU4xKfQfF2gkXQx2KNeQcmlcAHkwiiIwODgxKX6Gj77+jAhg/rs
+          vOL/Yufn+4poeAtqM4zSPF757iNviSswoCVA3Slxeq/0YBSfOPZOhNn4GPe0A9VxwD8mxK78FZxs2x9mOPZyhjc6HYJ6Kj8iLASpV5EaxEc+UyJ9
+          kDtZEwEao7Gps7ApDfSbJ9CQjfvrxHC8WIx92yFpSG2Jko55gGN0xSRRup26QSjl/rf3+LTLPM+0PVIuxDdN44sdgNctb7/xH4qxrN7ECuU36/6z
+          4atEgnMtt/7e7sPIN4TfAb6+FPSPwHQmqzIfs1F7mU+Qp4M3u4FzBCRkqvVSlJ3jx7SbCKHMQVENoAG2K03xwi/iczBAoScp03hu96nn1HIbJNao
+          XygHhe/cZ9vl21pojFok12amsr5icI/T0VPYlTuBCUM/mb5cghURYm+3J1BSy4TP5WxsM4viKgVQITQaeJGMHS6Xjx9EFUfAg18hDDGbqNzde+x3
+          jXRJCe/zE+dtGkuxbg+fJajEq65CI/Ow2dbXnNrxBTndrIwZuCXeMNFn2bXIObCZJA95jhA207WLdLTfUdA/JZM6VAKX++ts5NB9cot3Ydb0+JeJ
+          lNpAsgE0K9S+1qDDj4GajiYEsZFi5y5GQWs3GVgKFOCKCQ5eczqbSzs+X87a7a/CONfgCOm0Q8m+R+9qP091+D74qcTkUCc+jgglzJPIw7kkddSG
+          kGMhibLkSERQoP2I2bzL0g4PONu1AuCW1G+ToZira47rfZwcOjuU4S373IzFxtM00vJVj8eDU/cJPPY54AlLGRL8t6kyBeJnn9seLxTPg23P8ywZ
+          SwHrS+8CoVBPU8KmkPzRcnPa3Q0PZtotrJrKWK8/sy9ymfkzgFlfQbLBQPY/N6WsisVVvH9hhtretoWdAimNgo2BV/CMox/tFToeelCfdbbPeZ5X
+          DB3t3RzjIxhSEQXYSjIdApdRwjK+MVU1ZY4w60yCmw2OCsffF+dDPnDkA7GKiDySxVNi5mksx01qbg8KqE7Nv6eud55c4q6tF5/9XKej138Z9ac2
+          lBLQtUIPXALDp98/vvsHheboTEkZNLNRyhzQK7gVXbXWfw+QKmZTE+dnH0wPCOtgbVxv/SOsPo0FCfRhwW326tdfGFhuHPc+XnypLuS3haA1L6ql
+          IVpdU3Rw9kz8pUI1kUXSZmyntqtePAo4ICFK25JD5fs46/7f9BNfK8cFEzIeOiFLC59C7+FkSvKhztCVR+Q7s8ukHiex9fVRwsIG9tiGjA8VrMFA
+          VGIYQMNfKoK9FZJDmD60jNg9RBrR1ZpQI8yNPSenw/kNp0yMY2FzgY4qff6GubGeD5PlzSDoKJQlk+Y65IwUg5jAj1zlUWDK4Wk94o3NIyPw01V5
+          t3OnUamjQ5lPNwIxR/MhYhHp/s0mQat+zSTFhcmEEpUG6ShGgyZUtMIDQEQgHD1Uve7K49rPkQZhco7pct2ZhJYW0WRhIBLyXUJ1Q+ACJCbojuVK
+          ylZbttCww6j/7hNHPQ00kTo5HOHS4FGKzSQsK4gLGyZ3SGvgTP4F1rFLu5Wooe0v1oAfX+LlcF847E3kD8/gjZ4ntqEraoXW0GqWBBNBB1xbUQVx
+          qaV4nDa8n+IQCCeu0Ztx3Kw80ArjFbeZ1CBJwDzZnlZB7rGTvTz0GiZ9oseH8gshaZxJUPGDwmVswPVhGOYtdx5J+1arVQ3cda3Viln2nt9XIcig
+          NG+vEAL70tEaRQdh3T3VGegD0kom77HM+tZjMyL87Xl0IMkQlwPtlNa7R5uyt/Q9L5jtTuoJW1jKKgbAIjbEkv/4HcQYRZcdYgYEKrvHzYfrKj7P
+          CFj3W3/MnEB6W9bueVoP7/LGzrXraMinls22acaCQ7Lvs/rH0GHthUeBfIYAOWlutlvoaiG2rwVj49IPhzZNpl2OOJgTuM8upeG07AtmnDgAo4Sx
+          szb4u74LUG4m/Bpq5FnGmuYCzB3hqv9n08BVu1XsdHGCc4T7wF/okwsap79HLIXub07/7PVv3b6rBNxw9Ud5CaArHfgXH9USk/a8RgC6LFlL1vfv
+          sQGolajoZ36EpqPsqDq3kx6juCPs/Rxrfr5SahxgyYCU/OiMRwRYOWsk1paFbQvN2aa5RbwCzcabYATCMo4Oh11xV6OvXSj1FNPwVHYIVFAK+SNd
+          zJ4LzTPMPYEEBvyl/o370ItCtCmv+UYtTpujgiqgl6F+/TuWvLxfdd7zeH2aYRM5p/KTxADBlEuRNSwYBDbOExrGnAAV7/3eBmid64LwdeMX3tOa
+          3gOOpECGIUyHjQLiCUV27Q6XAyDYNRMPKcXRKjuZAjNkjyfKyGRFVk1nU6MXdwb36JZVvrylQsdYLlWofXHjYgOusvrjnlvmcFwCGHxsbBW9nrpU
+          ABtKj1PsrLK9Tqb+VK1vJL4bk/qY0bPfzVZb+i3rRZcr8TNfKTrPAUBz17Gf9+RUUgFKyzKJwTN/85i9G9JVXzlyFq7DR0k3hmUtwiKgTKs9hmrc
+          y/R/AKQN7slYfoy1Za2VxZS7WXGCzUMfglDyUcLSMPgKEw7A86izpV9gGaY3eew+FhCeTly/NCO9InjH5BoHxsSYd40CIyV5vGEkci6puPgc9CPn
+          jC9agL3HZK0qNVSPPBA6p81q++PgNqITg6v/+YU9hHblJPRLBt8hmOgIMuTJnJs09TWKZ6aD13RRbKFkvYwu8T8lps2PUniFaMP2XtHa2yY4gUS4
+          MrljoZlFGUmUX0Q5F/gPeCBgm6JJ+x0z5tXrixG+OHi9WAma72n+DIwJ/ttL6CX0vqJCTyDa3xO1xWa99T4p0IQqW9zJu5xfxgSCf36FHP8Gg42O
+          G3fD7Mk5iMcK2EOeN4k3gIyMMgN1vi77RN1PNpdCEGt2hu9WskG+MH2D4BtrTjxoKXuNMgHUAwhadkPFZJjNdDGTRUfG0UHhF7KO9e9OQzhJFhGZ
+          fDiBMQVLP0DxX5uvVS7f36iRagzfdbFyVTM5G1EZeXct8/W2D2NFp/45Iw/GxT0FZx7jmLPFfYb/Im56bjP68zF1nD0ya8au61BjEOjUkGcWcHME
+          YoOgK5svMF5DbNMpjv8e1jcv8l8ZYvTM1RbVFJfif5/UoVe8nubKeVgY3qOBeUPt+HIYKLNT/vzG21fck1UsZFC1feIfGxwIwrWpx3Tlmqm0PXNo
+          tWcJADa47HkRML7LZy2Suf7eHwyVHhDMZUH7NKO4yuYm1338RrTJBcSwl1pI+dVPfjBeIAIu1fMtiHyIkHDAnfuG84eWI4TR/znryfQqA1avDBe3
+          BpGjNuok3/tVCqzYdjK1HmFk4U2dPlxyUgmdDZXxgw0ZZvzPea0NH8nL0g4txC1h4jz9nR4Lr5x4Qi3I4hurfHZ8MJ9oa5SEC1GXDqSVLWRYb7/E
+          zaSuqDO9xGomySvC1A81JC7FIMCah1YQrpqud3audGeEswPIaMo3JeNTlAu1Am4KW5pMAChzjxe5hoRav8ky7QvwdgKPo10WTagl8DHCNGWtBQq9
+          LMpnP8yrXBmyYG9VVhf8RipXEnAMlz8H3nP/p93sP8DLug8yPGMYSwJD7NpvxSBxhASIeXM6FnWUjU/h7oEZLQJe4aiFDnnUvwMEgiw/Kv2EzrJq
+          47V6YMmHTuVZbiBlalE7mqX8E7XtghUZGWuynsock1W2ASxRapWfkqkk8eyZvSkm1eqluqq/S0iqibEoT9xAofcsjtIjDEVTBRMvpjaIxAuDZ1MA
+          2/+8LNvUhnzlXU5pOGQmj0AWWx4gWncL3sRCi1gCIKSMOmiw1L5GQjTt/IylmKzGpb7jGeDwyKwVhT0OACRAX7tZi8rm6Zb0Y+2M3RoOued4p4ue
+          eAjUIHLgzCh9YMmKT1gB0waW4S2p9mbe2nLD975rAxfTLdrT/kfpgE22uVckE4E49INh/xcNDPOxOqJdL53zPfTZYMStAw96/c6xiIxiDdqASINf
+          smBxLURuH7wnARa5GPbo2Sldc2iH4e6xfNZLGB+ximBFurDZ9WYlwmioaNglb8IVzTvbDdoyMTINzrp+2HJRT0VMomC3UlpAw/d9QfDi/D84jBHC
+          4qmkuY1ZNNPywvlujjCQS552FZ2OTpoybAMtX6NDUVZTDVvkSpe+Z4NmyYHzxugJhwVhP28esuMUwMYPbSWp9Gjle/4Gcgs192DAhNEYOD1XzAOK
+          FNUfSYTzB0VWZL2Jou4Iraci/GoOfCjl0aCqUSVLEhlvwaz6U+bdccsvqF3hiKieFWxQ0nsjuuwXEgdndG5wdTQT2zyM0kZyGv7KkGDpIVWIB0C/
+          XGeZ+Il2fn1xkz//E/53IgOYxo7oXjR6SBZ+gTD6siezihPtW3dWJ/FNoGBljEpofVAI+pOHldZsGWXbKUP4862lYaAt1SApaTZWXsu/cRtOX+eh
+          /fGhbBOIpBmM4D+18AXl3Piawlrir0NgSfAEmjqTvaav+viHD+Q02kMz0nOHo24TDNYE1eJQjbkcVwRudIMYlXBrtHes6D3GhkIbWo4kTNksj2j5
+          szvsgzWQIe4sc9JNgFTcgMk6zXBmGDH6SL9bstdghLk9ex8OTmDz6Ij6GsHBN5SGtuD4SCSpzl3EKDalDSWZOQ2NdM6HmKJOQrHICT5cPIz0CZ4N
+          /YKiwIob1Na1hR0oO5ZNpONEzsxDNFNTAokhKw/i0pAKNWCmo6RfRDL+BDZpWRd1Bnzx4y4V3TCAN0y1lFC6SxdVDFg/uE1PgwDq1fqyACaOidj1
+          JbeV5m0z9umhT6wbns0Os4GzHSpjqR0HxETYpYZd+d/FrLUiBMfsPnGekUZ0cI9X28JYwltDrE0dbMFPDxEii6Yu7ZId0yFFhhI0sD+/L20DAbnT
+          wDt0pLOkgqo1x5aLuIaijog+xh/bRCJ0VRH7DWiQsY0KabvgBtjzf4TarlsF6NgLwO03PQ2u/vIAAAAAGRa0mykShtUAAeYngKABAEwFk12xxGf7
+          AgAAAAAEWVo=
+          KIVI_ROOT_OVERLAY
+          python3 /tmp/kivi_root_overlay/apply_adb_root.py kivi-cleaner
+          mkdir -p /tmp/kivi_root_tests
+          javac -d /tmp/kivi_root_tests \
+            kivi-cleaner/app/src/main/java/ru/local/kivicleaner/RootCheckOutcome.java \
+            kivi-cleaner/tests/RootCheckOutcomeTest.java
+          java -cp /tmp/kivi_root_tests ru.local.kivicleaner.RootCheckOutcomeTest
+          grep -q '"root:"' kivi-cleaner/app/src/main/java/ru/local/kivicleaner/AdbClient.java
+          grep -q 'confirmRootCheck' kivi-cleaner/app/src/main/java/ru/local/kivicleaner/MainActivity.java
+      - name: Run full 0.1.13 tests
         run: bash kivi-cleaner/tests/test_core.sh
       - name: Install Android 35
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
@@ -161,10 +260,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          cp kivi-cleaner/app/build/outputs/apk/debug/app-debug.apk artifacts/KIVI-Cleaner-0.1.12-phone.apk
+          cp kivi-cleaner/app/build/outputs/apk/debug/app-debug.apk artifacts/KIVI-Cleaner-0.1.13-phone.apk
           cp kivi-cleaner/tvprobe/build/outputs/apk/debug/tvprobe-debug.apk artifacts/KIVI-VPN-Probe-0.1.10-TV.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: KIVI-Cleaner-0.1.12-FULL
+          name: KIVI-Cleaner-0.1.13-FULL
           path: artifacts/*.apk
           if-no-files-found: error
