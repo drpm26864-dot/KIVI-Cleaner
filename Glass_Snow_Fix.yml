@@ -1,0 +1,138 @@
+name: Build Glass 2.2.1 RU New Year REAL SNOW
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - .github/workflows/Glass-RealSnow-build.yml
+permissions:
+  contents: read
+jobs:
+  build-glass-dock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout wallpapers and patch from this repository
+        uses: actions/checkout@v4
+      - name: Check and unpack patch archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=""
+          for candidate in Glass-2.2.1-RU-NewYear-Dock-6-PATCH.zip .github/workflows/Glass-2.2.1-RU-NewYear-Dock-6-PATCH.zip; do
+            if test -s "$candidate"; then archive="$candidate"; break; fi
+          done
+          test -n "$archive" || { echo '::error::Patch ZIP not found in repository root or workflows'; exit 1; }
+          echo "Using patch: $archive"
+          mkdir -p glass-patch
+          unzip -q "$archive" -d glass-patch
+          for n in 01 02 03 04 05 06; do test -s "glass-patch/winter_$n.jpg"; done
+      - name: Clone upstream Glass 2.2.1 (MIT)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v2.2.1 https://github.com/tlfares/GlassLauncher.git glass-upstream
+          test "$(git -C glass-upstream rev-parse --short=7 HEAD)" = '8c99033'
+      - name: Apply the six themed wallpapers, Russian UI and light motion
+        shell: bash
+        run: python3 glass-patch/patch_glass.py glass-upstream
+      - name: Replace white points with real snowfall and lights
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/real_snow_fix.py <<'PYSCRIPT'
+          #!/usr/bin/env python3
+          """Glass 2.2.1: replace the old white-dot overlay with real falling snow + garland.
+          Run AFTER the Dock-6 patch: python3 real_snow_fix.py glass-upstream
+          """
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          home = root/'app/src/main/java/com/fares/glass/ui/HomeScreen.kt'
+          build = root/'app/build.gradle.kts'
+          s = home.read_text(encoding='utf-8')
+
+          # Delete the old animation clocks, which produced tiny near-static dots.
+          start = '    val winterMotion = rememberInfiniteTransition(label = "winterMotion")'
+          end = '    val scrollTarget ='
+          assert s.count(start) == 1, 'Old winter motion clock not found once'
+          a = s.index(start)
+          b = s.index(end, a)
+          s = s[:a] + s[b:]
+
+          # Delete the entire old Canvas and its 8 meaningless light dots.
+          start = '        // Winter visual layer: sparse slow snow and subtle fairy lights.'
+          end = '        // Glass dock under the first row; it fades out when you move into the grid.'
+          assert s.count(start) == 1, 'Old white-dots Canvas not found once'
+          a = s.index(start)
+          b = s.index(end, a)
+          s = s[:a] + '        RealSnowAndGarland(onHome = row == 0)\n\n' + s[b:]
+
+          # New effect is one stable composable: the animation clock does not restart
+          # when the remote navigates between dock and app rows.
+          assert 'private fun RealSnowAndGarland' not in s
+          s += '\n\n' + '/**\n * Live winter atmosphere.  Unlike the previous static-dot effect, the particles\n * travel the full screen every 8–16 seconds and the light strand gently pulses.\n * Drawn UNDER the Glass dock, clock and app tiles; never intercepts remote input.\n */\n@Composable\nprivate fun RealSnowAndGarland(onHome: Boolean) {\n    val winterTime = rememberInfiniteTransition(label = "realWinterAtmosphere")\n    val snowfall by winterTime.animateFloat(\n        initialValue = 0f,\n        targetValue = 1f,\n        animationSpec = infiniteRepeatable(tween(16000, easing = LinearEasing)),\n        label = "continuousFallingSnow"\n    )\n    val lightsTime by winterTime.animateFloat(\n        initialValue = 0f,\n        targetValue = 1f,\n        animationSpec = infiniteRepeatable(tween(3200, easing = LinearEasing)),\n        label = "garlandPulse"\n    )\n    // Keep the infinite clocks alive as the remote switches rows.  No flashes\n    // and no restart when returning to the home dock.\n    if (onHome) {\n        Canvas(Modifier.fillMaxSize()) {\n            val w = size.width\n            val h = size.height\n            val pi2 = 6.2831853f\n            // 50 staggered snowflakes.  Each makes one or two complete\n            // downward passes per 16-second cycle, then wraps cleanly to top.\n            for (i in 0 until 50) {\n                val startX = ((i * 179 + 71) % 997) / 997f\n                val startY = ((i * 283 + 53) % 991) / 991f\n                val speed = if (i % 4 == 0) 2f else 1f\n                val y = ((startY + snowfall * speed) % 1f) * h\n                val sway = kotlin.math.sin(snowfall * pi2 + i * 0.83f) * 0.014f\n                val x = ((startX + sway + 1f) % 1f) * w\n                val center = Offset(x, y)\n                val alpha = 0.40f + (i % 5) * 0.085f\n                val r = (1.10f + (i % 3) * 0.40f).dp.toPx()\n                if (i % 8 == 0) {\n                    // Clearly recognizable six-point snowflakes rather than\n                    // the old white specks that appeared on tab changes.\n                    val arm = (3.4f + (i % 3) * 0.8f).dp.toPx()\n                    for (j in 0 until 3) {\n                        val angle = j * 1.0471976f\n                        val dx = kotlin.math.cos(angle) * arm\n                        val dy = kotlin.math.sin(angle) * arm\n                        drawLine(\n                            color = Color(0xFFE6F5FF).copy(alpha = alpha),\n                            start = Offset(x - dx, y - dy),\n                            end = Offset(x + dx, y + dy),\n                            strokeWidth = 0.85.dp.toPx()\n                        )\n                    }\n                } else {\n                    drawCircle(\n                        color = Color(0xFFE6F5FF).copy(alpha = alpha),\n                        radius = r,\n                        center = center\n                    )\n                    if (i % 6 == 0) {\n                        drawLine(\n                            color = Color(0xFFE6F5FF).copy(alpha = alpha * 0.45f),\n                            start = Offset(x, y - r * 2.4f),\n                            end = center,\n                            strokeWidth = 0.6.dp.toPx()\n                        )\n                    }\n                }\n            }\n            // A visible string of 15 tiny Christmas bulbs, placed in the\n            // middle upper band so it stays clear of clock and top-right menu.\n            val number = 15\n            fun bulb(index: Int): Offset {\n                val t = index.toFloat() / (number - 1)\n                val x = w * (0.31f + 0.41f * t)\n                val y = h * (0.255f + 0.032f * kotlin.math.sin(t * 3.1415927f))\n                return Offset(x, y)\n            }\n            for (i in 0 until number - 1) {\n                drawLine(\n                    color = Color(0xFFDEBE91).copy(alpha = 0.58f),\n                    start = bulb(i),\n                    end = bulb(i + 1),\n                    strokeWidth = 0.8.dp.toPx()\n                )\n            }\n            for (i in 0 until number) {\n                val p = bulb(i)\n                val pulse = 0.5f + 0.5f * kotlin.math.sin(lightsTime * pi2 + i * 0.73f)\n                val tone = when (i % 4) {\n                    0 -> Color(0xFFFFC76D) // warm gold\n                    1 -> Color(0xFFFFE9B2) // champagne\n                    2 -> Color(0xFF9DE6FF) // icy blue\n                    else -> Color(0xFFFFBFAF) // soft red\n                }\n                drawCircle(\n                    color = tone.copy(alpha = 0.11f + 0.17f * pulse),\n                    radius = (6.0f + pulse * 3f).dp.toPx(),\n                    center = p\n                )\n                drawCircle(\n                    color = tone.copy(alpha = 0.64f + 0.35f * pulse),\n                    radius = 2.3.dp.toPx(),\n                    center = p\n                )\n                drawCircle(\n                    color = Color.White.copy(alpha = 0.55f + 0.45f * pulse),\n                    radius = 0.95.dp.toPx(),\n                    center = p\n                )\n            }\n        }\n    }\n}\n' + '\n'
+
+          assert 'val winterMotion' not in s
+          assert 'snowDrift' not in s
+          assert 'realWinterAtmosphere' in s
+          assert 'continuousFallingSnow' in s
+          assert 'garlandPulse' in s
+          assert s.count('RealSnowAndGarland(onHome = row == 0)') == 1
+          home.write_text(s, encoding='utf-8')
+
+          v = build.read_text(encoding='utf-8')
+          assert 'versionCode = 8' in v and 'versionName = "2.2.1-RU-NewYear-Dock-6"' in v
+          v = v.replace('versionCode = 8', 'versionCode = 9')
+          v = v.replace('versionName = "2.2.1-RU-NewYear-Dock-6"',
+                        'versionName = "2.2.1-RU-NewYear-RealSnow"')
+          build.write_text(v, encoding='utf-8')
+          print('REAL SNOW FIX OK: old white dots removed, 50 falling flakes + 15 softly twinkling bulbs')
+          PYSCRIPT
+          python3 /tmp/real_snow_fix.py glass-upstream
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Use Android SDK preinstalled on GitHub runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$sdk_root" || { echo "::error::Android SDK missing: $sdk_root"; exit 1; }
+          sdkmanager_bin="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager_bin" ]; then sdkmanager_bin="$(command -v sdkmanager || true)"; fi
+          test -x "$sdkmanager_bin" || { echo '::error::sdkmanager missing'; exit 1; }
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          "$sdkmanager_bin" --sdk_root="$sdk_root" 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          test -s "$sdk_root/platforms/android-36/android.jar"
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+      - name: Compile Android APK
+        shell: bash
+        run: |
+          cd glass-upstream
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug
+      - name: Verify Real Snow source, wallpapers and APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=glass-upstream/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          grep -q 'continuousFallingSnow' glass-upstream/app/src/main/java/com/fares/glass/ui/HomeScreen.kt
+          grep -q 'garlandPulse' glass-upstream/app/src/main/java/com/fares/glass/ui/HomeScreen.kt
+          ! grep -q 'winterMotion' glass-upstream/app/src/main/java/com/fares/glass/ui/HomeScreen.kt
+          for n in 01 02 03 04 05 06; do unzip -Z1 "$apk" | grep -qx "assets/winter_$n.jpg"; done
+          mkdir -p artifacts
+          cp "$apk" artifacts/Glass-2.2.1-RU-NewYear-RealSnow.apk
+          sha256sum artifacts/*.apk
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glass-NewYear-REAL-SNOW-APK
+          path: artifacts/Glass-2.2.1-RU-NewYear-RealSnow.apk
+          if-no-files-found: error
